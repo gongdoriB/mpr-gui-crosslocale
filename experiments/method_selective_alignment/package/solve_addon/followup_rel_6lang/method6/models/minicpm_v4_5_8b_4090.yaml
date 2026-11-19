@@ -1,0 +1,31 @@
+model_id: openbmb/MiniCPM-V-4_5
+model_family: minicpmv
+# HF main as of 2026-11-14 (last modified 2026-11-09). 8,695,895,280 BF16 parameters,
+# 17,391,790,560 bytes of safetensors. Language model: Qwen3ForCausalLM (Qwen3-8B), vision: SigLIP-400M navit.
+revision: 14a2004908140699317e2109e90573c1e6323c36
+dtype: bfloat16
+quantization: null
+trust_remote_code: true
+
+# LLM attention: SDPA (as the Qwen runs). The SigLIP vision tower is forced to eager by the
+# model's own remote code (it does not support SDPA); flash-attn is not installed.
+attn_implementation: sdpa
+device_strategy: cuda:0
+
+# Native MiniCPM-V slicing: up to 9 slices of ~448x448 plus one downscaled overview image.
+# Every slice becomes 64 tokens, so at most 10 x 64 = 640 visual tokens (~1.8 Mpixel of
+# slice area, Qwen3 configs cap at 2.1 Mpixel). The token count is lower than Qwen3 (<=2,048)
+# and InternVL3.5 (<=2,304) because MiniCPM-V compresses each slice with a resampler;
+# max_slice_nums is the model's trained maximum and is not raised.
+processor_profile: minicpmv_slice9_448
+max_slice_nums: 9
+input_size: 448
+vision_token_limit: 640
+enable_thinking: false
+
+prompt_profile: mpr_label_only_v1
+generation:
+  do_sample: false
+  num_beams: 1
+  max_new_tokens: 2
+  temperature: null

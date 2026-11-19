@@ -1,0 +1,17 @@
+{
+ "schema": "rstem-ropts-6lang-inputs-v1",
+ "created": "2026-11-18",
+ "source": "model_expansion_20261116/vast4090b_frja/addon/followup_rel_6lang/b2_frja/expA6_all6_inputs/OR_gemma_conditions.jsonl",
+ "source_sha256": "bef9894ff6a3033121d49c6537e7cbff5a1762dcc0059197964935cd6df13122",
+ "rule": "R_stem = R question_stem + O options; R_opts = O question_stem + R options; O and R copied; question = stem + ' A: .. B: ..' (same rule as rstem_ropts_qwen3_20261109 mixed_conditions.jsonl, checked 3792/3792 rows equal)",
+ "pairs": 4740,
+ "pairs_with_fr_or_ja": 2844,
+ "rows": 18960,
+ "conditions": {
+  "O": 4740,
+  "R_stem": 4740,
+  "R_opts": 4740,
+  "R": 4740
+ },
+ "file_sha256": "940ed67e5a54a2fc03ab1c5060d1e41a960416aabbb88640c83ac78d0b103351"
+}

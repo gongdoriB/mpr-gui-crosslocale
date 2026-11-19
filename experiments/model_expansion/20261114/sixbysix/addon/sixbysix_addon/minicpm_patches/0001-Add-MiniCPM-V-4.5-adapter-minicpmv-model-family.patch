@@ -1,0 +1,352 @@
+From f4f0d974a616b4f5c9902713a4ab4f36a6abd8a7 Mon Sep 17 00:00:00 2001
+From: local <local@local>
+Date: Sat, 14 Nov 2026 01:50:39 +0900
+Subject: [PATCH] Add MiniCPM-V-4.5 adapter (minicpmv model family)
+
+New models/minicpmv.py plugs into the existing generate_one interface (greedy,
+max_new_tokens 2, first-token A-D label scoring). run_cross_locale._build_model_adapter
+and run_rel_followup's family check accept model_family minicpmv; code_identity and the
+cross-locale contract also hash minicpmv.py. Config: minicpm_v4_5_8b_4090.yaml
+(pinned revision, max_slice_nums 9).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../configs/models/minicpm_v4_5_8b_4090.yaml  |  31 +++
+ .../inference/run_cross_locale.py             |  19 +-
+ .../inference/run_rel_followup.py             |   9 +-
+ .../src/mpr_crosslocale/models/minicpmv.py    | 207 ++++++++++++++++++
+ 4 files changed, 261 insertions(+), 5 deletions(-)
+ create mode 100644 01_code/configs/models/minicpm_v4_5_8b_4090.yaml
+ create mode 100644 01_code/src/mpr_crosslocale/models/minicpmv.py
+
+diff --git a/01_code/configs/models/minicpm_v4_5_8b_4090.yaml b/01_code/configs/models/minicpm_v4_5_8b_4090.yaml
+new file mode 100644
+index 0000000..465c1a7
+--- /dev/null
++++ b/01_code/configs/models/minicpm_v4_5_8b_4090.yaml
+@@ -0,0 +1,31 @@
++model_id: openbmb/MiniCPM-V-4_5
++model_family: minicpmv
++# HF main as of 2026-11-14 (last modified 2026-11-09). 8,695,895,280 BF16 parameters,
++# 17,391,790,560 bytes of safetensors. Language model: Qwen3ForCausalLM (Qwen3-8B), vision: SigLIP-400M navit.
++revision: 14a2004908140699317e2109e90573c1e6323c36
++dtype: bfloat16
++quantization: null
++trust_remote_code: true
++
++# LLM attention: SDPA (as the Qwen runs). The SigLIP vision tower is forced to eager by the
++# model's own remote code (it does not support SDPA); flash-attn is not installed.
++attn_implementation: sdpa
++device_strategy: cuda:0
++
++# Native MiniCPM-V slicing: up to 9 slices of ~448x448 plus one downscaled overview image.
++# Every slice becomes 64 tokens, so at most 10 x 64 = 640 visual tokens (~1.8 Mpixel of
++# slice area, Qwen3 configs cap at 2.1 Mpixel). The token count is lower than Qwen3 (<=2,048)
++# and InternVL3.5 (<=2,304) because MiniCPM-V compresses each slice with a resampler;
++# max_slice_nums is the model's trained maximum and is not raised.
++processor_profile: minicpmv_slice9_448
++max_slice_nums: 9
++input_size: 448
++vision_token_limit: 640
++enable_thinking: false
++
++prompt_profile: mpr_label_only_v1
++generation:
++  do_sample: false
++  num_beams: 1
++  max_new_tokens: 2
++  temperature: null
+diff --git a/01_code/src/mpr_crosslocale/inference/run_cross_locale.py b/01_code/src/mpr_crosslocale/inference/run_cross_locale.py
+index 9ce357a..de2c497 100644
+--- a/01_code/src/mpr_crosslocale/inference/run_cross_locale.py
++++ b/01_code/src/mpr_crosslocale/inference/run_cross_locale.py
+@@ -39,6 +39,7 @@ from mpr_crosslocale.inference.runtime import (
+ )
+ from mpr_crosslocale.inference.system_prompts import build_system_prompt
+ from mpr_crosslocale.models.internvl25 import InternVL25Adapter
++from mpr_crosslocale.models.minicpmv import MiniCPMVAdapter
+ from mpr_crosslocale.models.qwen25vl import Qwen25VLAdapter
+ 
+ 
+@@ -102,7 +103,8 @@ def run(args: argparse.Namespace) -> None:
+             Path(__file__), Path(__file__).with_name("runtime.py"),
+             Path(__file__).with_name("prompts.py"), Path(__file__).with_name("system_prompts.py"),
+             Path(__file__).parents[1] / "models/qwen25vl.py",
+-            Path(__file__).parents[1] / "models/qwen3_memory.py")},
++            Path(__file__).parents[1] / "models/qwen3_memory.py",
++            Path(__file__).parents[1] / "models/minicpmv.py")},
+     }
+     contract_path = args.output.with_suffix(args.output.suffix + ".contract.json")
+     if contract_path.exists():
+@@ -380,6 +382,8 @@ def _build_model_adapter(args: argparse.Namespace, model_config: dict[str, Any])
+         return _build_qwen_adapter(args, model_config)
+     if model_family == "internvl2_5":
+         return _build_internvl_adapter(args, model_config)
++    if model_family == "minicpmv":
++        return _build_minicpmv_adapter(args, model_config)
+     raise ValueError(f"Unsupported model_family: {model_family!r}")
+ 
+ 
+@@ -429,6 +433,19 @@ def _build_internvl_adapter(
+     )
+ 
+ 
++def _build_minicpmv_adapter(args: argparse.Namespace, model_config: dict[str, Any]) -> MiniCPMVAdapter:
++    return MiniCPMVAdapter(
++        model_id=model_config["model_id"],
++        revision=model_config.get("revision"),
++        dtype=model_config.get("dtype", "bfloat16"),
++        device_map=args.device_map or model_config.get("device_strategy", "cuda:0"),
++        trust_remote_code=bool(model_config.get("trust_remote_code", True)),
++        attn_implementation=args.attn_implementation or model_config.get("attn_implementation", "sdpa"),
++        max_slice_nums=model_config.get("max_slice_nums", 9),
++        enable_thinking=bool(model_config.get("enable_thinking", False)),
++    )
++
++
+ def _utc_now() -> str:
+     return datetime.now(timezone.utc).isoformat()
+ 
+diff --git a/01_code/src/mpr_crosslocale/inference/run_rel_followup.py b/01_code/src/mpr_crosslocale/inference/run_rel_followup.py
+index 54054b1..5a0250d 100644
+--- a/01_code/src/mpr_crosslocale/inference/run_rel_followup.py
++++ b/01_code/src/mpr_crosslocale/inference/run_rel_followup.py
+@@ -132,6 +132,7 @@ def code_identity() -> dict:
+         package / "models/qwen25vl.py",
+         package / "models/qwen3_memory.py",
+         package / "models/internvl25.py",
++        package / "models/minicpmv.py",
+         package / "inference/prompts.py",
+         package / "inference/system_prompts.py",
+         package / "inference/run_cross_locale.py",
+@@ -399,10 +400,10 @@ def run(args) -> dict:
+     config = load_yaml(args.model_config)
+     if args.batch_size > 1 and config.get("model_family") not in ("qwen2_5_vl", "qwen3_vl"):
+         raise ValueError("REL batched inference currently supports Qwen VL models only")
+-    if config.get("model_family") not in ("qwen2_5_vl", "qwen3_vl", "internvl2_5") or not config.get(
+-        "revision"
+-    ):
+-        raise ValueError("Use a pinned Qwen VL or InternVL2.5 model configuration")
++    if config.get("model_family") not in (
++        "qwen2_5_vl", "qwen3_vl", "internvl2_5", "minicpmv"
++    ) or not config.get("revision"):
++        raise ValueError("Use a pinned Qwen VL, InternVL2.5 or MiniCPM-V model configuration")
+     if config.get("prompt_profile") != "mpr_label_only_v1":
+         raise ValueError("This experiment uses mpr_label_only_v1")
+     if config.get("dtype") != "bfloat16" or config.get("quantization") is not None:
+diff --git a/01_code/src/mpr_crosslocale/models/minicpmv.py b/01_code/src/mpr_crosslocale/models/minicpmv.py
+new file mode 100644
+index 0000000..696eb90
+--- /dev/null
++++ b/01_code/src/mpr_crosslocale/models/minicpmv.py
+@@ -0,0 +1,207 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++from PIL import Image, ImageOps
++
++from mpr_crosslocale.inference.constrained_choice import LABELS
++from mpr_crosslocale.inference.label_scoring import LabelScoreSummary, summarize_label_logprobs
++from mpr_crosslocale.inference.prompts import build_prompt_text
++
++IMAGE_TAG = "(<image>./</image>)"
++MAX_INPUT_LENGTH = 16384  # same value as MiniCPMV.chat()
++
++
++@dataclass(frozen=True)
++class MiniCPMVGenerateOutput:
++    raw_output: str
++    rendered_prompt: str
++    prompt_token_count: int
++    output_token_count: int
++    label_summary: LabelScoreSummary | None = None
++    num_patches_list: tuple[int, ...] = ()
++    visual_token_count: int | None = None
++
++
++def _torch_dtype(dtype_name: str):
++    import torch
++
++    aliases = {
++        "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
++        "float16": torch.float16, "fp16": torch.float16,
++        "float32": torch.float32, "fp32": torch.float32,
++    }
++    try:
++        return aliases[dtype_name]
++    except KeyError as exc:
++        raise ValueError(f"Unsupported dtype: {dtype_name!r}") from exc
++
++
++def _clean_kwargs(config: dict[str, Any]) -> dict[str, Any]:
++    return {key: value for key, value in config.items() if value is not None}
++
++
++class MiniCPMVAdapter:
++    """Transformers remote-code backend for MiniCPM-V 4.5 (Qwen3-8B + SigLIP, trust_remote_code).
++
++    The model's own chat() is not used because it samples or beam-searches by default and
++    returns text only. This class reproduces its prompt construction (chat template with
++    enable_thinking=False, "(<image>./</image>)" placeholder, slicing by the model's image
++    processor) and calls the model's generate() with greedy decoding so that the
++    first-step logits over A-D can be read, as in the other adapters.
++    """
++
++    model_id = "openbmb/MiniCPM-V-4_5"
++
++    def __init__(
++        self,
++        model_id: str = model_id,
++        revision: str | None = None,
++        dtype: str = "bfloat16",
++        device_map: str | None = "cuda:0",
++        trust_remote_code: bool = True,
++        attn_implementation: str = "sdpa",
++        max_slice_nums: int | None = 9,
++        enable_thinking: bool = False,
++    ) -> None:
++        import torch
++        from transformers import AutoModel, AutoProcessor, AutoTokenizer
++
++        if not trust_remote_code:
++            raise ValueError("MiniCPM-V requires trust_remote_code=True")
++        if not revision and not Path(model_id).is_dir():
++            raise ValueError("MiniCPM-V remote code must use a pinned model revision")
++        if enable_thinking:
++            raise ValueError("Thinking mode is not used: answers are one label (max_new_tokens=2)")
++        revision_kwargs = {"revision": revision} if revision else {}
++        self.dtype = _torch_dtype(dtype)
++        self.model_id = model_id
++        self.revision = revision
++        self.max_slice_nums = max_slice_nums
++        self.enable_thinking = enable_thinking
++        if device_map in (None, "auto"):
++            device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
++        self.device = torch.device(device_map)
++        self.tokenizer = AutoTokenizer.from_pretrained(
++            model_id, trust_remote_code=True, **revision_kwargs
++        )
++        self.processor = AutoProcessor.from_pretrained(
++            model_id, trust_remote_code=True, **revision_kwargs
++        )
++        self.model = AutoModel.from_pretrained(
++            model_id,
++            trust_remote_code=True,
++            torch_dtype=self.dtype,
++            attn_implementation=attn_implementation,
++            low_cpu_mem_usage=True,
++            **revision_kwargs,
++        ).eval().to(self.device)
++        self.model.processor = self.processor
++        self._label_ids = self._label_token_ids()
++        if any(len(ids) != 1 for ids in self._label_ids.values()):
++            raise ValueError("A/B/C/D labels are not single-token under the MiniCPM-V tokenizer")
++
++    @staticmethod
++    def build_question(input_row: dict[str, Any], prompt_profile: str) -> str:
++        image_prefix = "".join(f"{IMAGE_TAG}\n" for _ in input_row["image_paths"])
++        return image_prefix + build_prompt_text(str(input_row["question_raw"]), prompt_profile)
++
++    def _render(self, question: str, system_prompt: str | None) -> str:
++        messages = []
++        if system_prompt:
++            messages.append({"role": "system", "content": system_prompt})
++        messages.append({"role": "user", "content": question})
++        return self.tokenizer.apply_chat_template(
++            messages,
++            tokenize=False,
++            add_generation_prompt=True,
++            enable_thinking=self.enable_thinking,
++        )
++
++    @staticmethod
++    def _load_image(path: str | Path) -> Image.Image:
++        with Image.open(path) as opened:
++            return ImageOps.exif_transpose(opened).convert("RGB")
++
++    def generate_one(
++        self,
++        input_row: dict[str, Any],
++        prompt_profile: str,
++        generation_config: dict[str, Any],
++        system_prompt: str | None = None,
++        score_labels: bool = False,
++    ) -> MiniCPMVGenerateOutput:
++        image_paths = [str(path) for path in input_row["image_paths"]]
++        if not image_paths:
++            raise ValueError("MiniCPM-V inference requires at least one image")
++        images = [self._load_image(path) for path in image_paths]
++        rendered_prompt = self._render(self.build_question(input_row, prompt_profile), system_prompt)
++        inputs = self.processor(
++            [rendered_prompt],
++            [images],
++            max_slice_nums=self.max_slice_nums,
++            use_image_id=None,
++            return_tensors="pt",
++            max_length=MAX_INPUT_LENGTH,
++        ).to(self.device)
++        inputs.pop("image_sizes")
++        image_bound = inputs["image_bound"][0]
++        visual_token_count = int(sum(int(end - start) for start, end in image_bound.tolist()))
++        num_patches_list = (len(inputs["pixel_values"][0]),)
++        prompt_token_count = int(inputs["input_ids"].shape[1])
++
++        generation_kwargs = _clean_kwargs(dict(generation_config))
++        generation_kwargs.setdefault("do_sample", False)
++        if score_labels:
++            generation_kwargs["return_dict_in_generate"] = True
++            generation_kwargs["output_logits"] = True
++        output = self.model.generate(
++            **inputs,
++            tokenizer=self.tokenizer,
++            decode_text=False,
++            **generation_kwargs,
++        )
++
++        label_summary = None
++        if score_labels:
++            generated_ids = output.sequences
++            logits = getattr(output, "logits", None)
++            if logits is None or len(logits) == 0:
++                raise RuntimeError("MiniCPM-V generation did not return first-step logits")
++            label_summary = self._summarize_label_logits(logits[0][0], input_row)
++        else:
++            generated_ids = output
++        # generate() with inputs_embeds returns only the new tokens.
++        raw_output = self.tokenizer.batch_decode(
++            generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
++        )[0].strip()
++        return MiniCPMVGenerateOutput(
++            raw_output=raw_output,
++            rendered_prompt=rendered_prompt,
++            prompt_token_count=prompt_token_count,
++            output_token_count=int(generated_ids.shape[1]),
++            label_summary=label_summary,
++            num_patches_list=num_patches_list,
++            visual_token_count=visual_token_count,
++        )
++
++    def _summarize_label_logits(self, next_token_logits: Any, input_row: dict[str, Any]) -> LabelScoreSummary:
++        import torch
++
++        log_probs = torch.nn.functional.log_softmax(next_token_logits.float(), dim=-1)
++        label_logprobs = {
++            label: float(log_probs[ids[0]].detach().cpu()) for label, ids in self._label_ids.items()
++        }
++        return summarize_label_logprobs(
++            label_logprobs,
++            gold_label=str(input_row["gold_label"]),
++            scoring_method="next_token_single_label",
++            label_token_ids=self._label_ids,
++        )
++
++    def _label_token_ids(self) -> dict[str, list[int]]:
++        return {
++            label: list(self.tokenizer.encode(label, add_special_tokens=False)) for label in LABELS
++        }
+-- 
+2.50.0
+

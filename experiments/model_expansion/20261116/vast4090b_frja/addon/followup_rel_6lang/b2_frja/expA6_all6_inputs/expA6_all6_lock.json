@@ -1,0 +1,26 @@
+{
+ "schema": "rel-expA-T-6lang-inputs-v1",
+ "scope": "all6",
+ "created": "2026-11-16",
+ "files": {
+  "OR_gemma_conditions.jsonl": "bef9894ff6a3033121d49c6537e7cbff5a1762dcc0059197964935cd6df13122",
+  "T_gemma_conditions.jsonl": "a7f17639e62c71c1ab45ba0b2ae6830c5db4d92036ee7abb6024be28c66e987b",
+  "T_gemma_retry_conditions.jsonl": "b4e102fc2d2c0c0dd3068486f352805e89c48b68d2f7759453289992c6de19bb"
+ },
+ "frozen_conditions_sha256": "63101abfa53782b78d3f2d3c5b2d23264288e650822734fc75027d1159f731ed",
+ "expected_pairs": {
+  "main": 4740
+ },
+ "expected_retry_changed_pairs": 262,
+ "require_new_language": false,
+ "sources": {
+  "old_T_conditions.jsonl": "0ebbed0f2320a799ef609d97907eab2b62252ab04a421db9b5edf172049f0782",
+  "old_retry_conditions.jsonl": "5865950ee7e46ff46e3449d5a451df23fae052e9ef03bd99e31e1e4b9b43dac5",
+  "new_T_gemma_conditions.jsonl": "36a2f1d03023a160fa653dcfd78a4742378e7cba35739c96effedd6877469cb7",
+  "new_T_gemma_retry_conditions.jsonl": "6cdd88d6823dade10e3ae7006ff985004cfdfa37afff515d1c28fadf55349e47",
+  "new_OR_gemma_conditions.jsonl": "1ad03efce24d33a633e2ca55e041e3878669dbcd1c63d6dc6f3f604070b3ee45"
+ },
+ "retry_changed_pairs_old_main": 114,
+ "retry_changed_pairs_new_main": 148,
+ "note": "old part: T of the earlier 4-language Exp A run (first Gemma translation), O/R from the frozen REL rows; new part: Gemma 6-language files, main split."
+}
